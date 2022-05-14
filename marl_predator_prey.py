@@ -1,4 +1,3 @@
-
 import gym
 from gym import spaces
 from gym.utils import seeding
@@ -8,7 +7,9 @@ from os import path
 import itertools
 from quadrotor_dynamics import Drone, Bot, Tank1, Tank_Bot
 from collections import deque
+import time
 
+np.random.seed(int(time.time()))
 
 font = {'family': 'sans-serif',
         'weight': 'bold',
@@ -57,9 +58,9 @@ class QuadrotorFormationMARL(gym.Env):
         #################################Obstacles#########################
 
         self.obstacle_points = np.array(
-            [[10, 5, 1, 12, 10, 2], [0, 10, 3, 1, 12, 5], [0, 11, 2, 2, 13, 3]])
+            [[10, 35, 7, 12, 40, 9], [22, 15, 3, 24, 17, 5], [0, 11, 2, 2, 13, 3]])
         self.static_obstacle_points = np.array(
-            [[0, 5, 1, 1, 8, 4], [10, 0, 0, 12, 3, 2], [6, 2, 1, 8, 5, 4]])
+            [[40, 30, 6, 42, 38, 8], [12, 20, 0, 14, 23, 2], [16, 2, 1, 18, 5, 4]])
 
         self.obstacle_indices = None
         self.obstacle_pos_xy = None
@@ -81,9 +82,9 @@ class QuadrotorFormationMARL(gym.Env):
                 (6*self.n_agents) + (4*self.n_tank_agents))
 
         # intitialize grid information
-        self.x_lim = 13  # grid x limit
-        self.y_lim = 13  # grid y limit
-        self.z_lim = 5
+        self.x_lim = 42  # grid x limit
+        self.y_lim = 42  # grid y limit
+        self.z_lim = 10
 
         self.uncertainty_grid = np.ones((self.x_lim, self.y_lim, self.z_lim))
         self.obs_shape = self.x_lim * self.y_lim * self.z_lim + \

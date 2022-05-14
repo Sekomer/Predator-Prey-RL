@@ -17,10 +17,11 @@ QuadrotorFormation = QuadrotorFormationMARL
 # os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 TOTAL_TIMESTEPS = 50_000_000
-CHECKPOINT_FREQ = 100_000
+CHECKPOINT_FREQ = 500_000
 N_ENV = 8
-DEMO = False
-TEST = False
+DEMO = True
+TRAIN = True
+
 
 def make_env():
     def _init():
@@ -32,7 +33,7 @@ def make_env():
 
 if __name__ == '__main__':
     # callbacks
-    if not TEST:
+    if TRAIN:
         checkpoint_callback = CheckpointCallback(save_freq=CHECKPOINT_FREQ, save_path='./model_checkpoints/', name_prefix='rl_model_dyno_')
     else:
         checkpoint_callback = None
@@ -44,13 +45,13 @@ if __name__ == '__main__':
                 exploration_fraction=0.99,
                 verbose=2, policy_kwargs={"net_arch": [512, 512, 512]})
     
-    if not TEST:
+    if TRAIN:
         model.learn(total_timesteps=TOTAL_TIMESTEPS, log_interval=5,
                 tb_log_name="dqn_log_dyno", callback=checkpoint_callback)
         model.save("dqn_predator_dyno")
         del model
 
-    model.load("dqn_predator_dyno")
+    model = DQN.load("dqn_predator_dyno")
     obs = env.reset()
     total_rew = 0
     rews = []
@@ -63,7 +64,7 @@ if __name__ == '__main__':
     ax.set_zlim3d(0, env.z_lim)
 
     env = QuadrotorFormation(visualization=False, moving_target=True)
-    env.reset()
+    obs = env.reset()
 
     if DEMO:
         i = 0
