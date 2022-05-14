@@ -1,3 +1,4 @@
+
 import gym
 from gym import spaces
 from gym.utils import seeding
@@ -7,9 +8,7 @@ from os import path
 import itertools
 from quadrotor_dynamics import Drone, Bot, Tank1, Tank_Bot
 from collections import deque
-import time
 
-np.random.seed(int(time.time()))
 
 font = {'family': 'sans-serif',
         'weight': 'bold',
@@ -58,9 +57,9 @@ class QuadrotorFormationMARL(gym.Env):
         #################################Obstacles#########################
 
         self.obstacle_points = np.array(
-            [[10, 35, 7, 12, 40, 9], [22, 15, 3, 24, 17, 5], [0, 11, 2, 2, 13, 3]])
+            [])  # [[10, 5, 1, 12, 10, 2], [0, 10, 3, 1, 12, 5], [0, 11, 2, 2, 13, 3]])
         self.static_obstacle_points = np.array(
-            [[40, 30, 6, 42, 38, 8], [12, 20, 0, 14, 23, 2], [16, 2, 1, 18, 5, 4]])
+            [])  # [[0, 5, 1, 1, 8, 4], [10, 0, 0, 12, 3, 2], [6, 2, 1, 8, 5, 4]])
 
         self.obstacle_indices = None
         self.obstacle_pos_xy = None
@@ -75,16 +74,15 @@ class QuadrotorFormationMARL(gym.Env):
             print("WARNING, CENTRALIZED TRAINING CANT HAVE MORE THAN 1 AGENT")
             self.n_agents = 1
 
-        
         # 4*tank + 6*drone
         if True:
             self.action_space = spaces.Discrete(
                 (6*self.n_agents) + (4*self.n_tank_agents))
 
         # intitialize grid information
-        self.x_lim = 42  # grid x limit
-        self.y_lim = 42  # grid y limit
-        self.z_lim = 10
+        self.x_lim = 13  # grid x limit
+        self.y_lim = 13  # grid y limit
+        self.z_lim = 5
 
         self.uncertainty_grid = np.ones((self.x_lim, self.y_lim, self.z_lim))
         self.obs_shape = self.x_lim * self.y_lim * self.z_lim + \
@@ -92,7 +90,7 @@ class QuadrotorFormationMARL(gym.Env):
              self.max_drone_bots + self.max_tank_bots)*3
 
         self.observation_space = spaces.Box(low=-255, high=255,
-                                            shape=(156, ), dtype=np.float32)
+                                            shape=(120, ), dtype=np.float32)
 
         self.lim_values = [self.x_lim, self.y_lim, self.z_lim]
         self.grid_res = 1.0  # resolution for grids
@@ -290,15 +288,29 @@ class QuadrotorFormationMARL(gym.Env):
             mox, moy, moz, ox, oy, oz = obstacle
             cubic_env[mox:ox][moy:oy][moz:oz] = 1
 
-        # .####################### uncertainty_grids##################################3
+        # .####################### uncertainty_grids ##################################3
         self.uncertainty_grid += 0.1
         self.uncertainty_grid = np.clip(self.uncertainty_grid, 0, 1)
         for agent_ind in range(self.n_agents):
             self.uncertainty_grid[self.quadrotors[agent_ind].state[0]
                                   ][self.quadrotors[agent_ind].state[1]][self.quadrotors[agent_ind].state[2]] = 0
         for agent_ind in range(self.n_tank_agents):
-            self.uncertainty_grid[self.tanks[agent_ind].state[0]
-                                  ][self.tanks[agent_ind].state[1]][self.tanks[agent_ind].state[2]] = 0
+
+            x = self.tanks[agent_ind].state[0]
+            y = self.tanks[agent_ind].state[1]
+            z = self.tanks[agent_ind].state[2]
+            r = 3
+            self.uncertainty_grid[max(x-r, 0):min(x+r, self.x_lim), max(y-r, 0):min(
+                y+r, self.y_lim), max(z-r, 0):min(z+r, self.z_lim)] = 0.75
+            r = 2
+            self.uncertainty_grid[max(x-r, 0):min(x+r, self.x_lim), max(y-r, 0):min(
+                y+r, self.y_lim), max(z-r, 0):min(z+r, self.z_lim)] = 0.5
+            r = 1
+            self.uncertainty_grid[max(x-r, 0):min(x+r, self.x_lim), max(y-r, 0):min(
+                y+r, self.y_lim), max(z-r, 0):min(z+r, self.z_lim)] = 0.25
+            r = 0
+            self.uncertainty_grid[max(x-r, 0):min(x+r, self.x_lim), max(
+                y-r, 0):min(y+r, self.y_lim), max(z-r, 0):min(z+r, self.z_lim)] = 0
 
         if (not agent and bot_agent) or (not bot_agent and not tank_bot_agent) or (not agent and not tank_agent):
             done = True
@@ -480,7 +492,7 @@ class QuadrotorFormationMARL(gym.Env):
         else:
             pass
 
-        return np.zeros((156, ))
+        return np.zeros((120, ))
 
     def get_drone_stack(self, agent_ind):
         drone_closest_grids = self.get_closest_n_grids(
