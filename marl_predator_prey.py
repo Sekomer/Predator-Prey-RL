@@ -20,7 +20,7 @@ class QuadrotorFormationMARL(gym.Env):
     def __init__(self, n_agents=1, n_bots=2,
                  n_tank_agents=1, n_tank_bots=2,
                  N_frame=5, visualization=True,
-                 is_centralized=False, moving_target=True, exploration_learning=False):
+                 is_centralized=False, moving_target=True, exploration_learning=True):
 
         super(QuadrotorFormationMARL, self).__init__()
         self. exploration_learning = exploration_learning
@@ -69,7 +69,7 @@ class QuadrotorFormationMARL(gym.Env):
 
         if self.n_tank_agents > 1:
             print("WARNING, CENTRALIZED TRAINING CANT HAVE MORE THAN 1 AGENT")
-            self.n_tank_agents = 0
+            self.n_tank_agents = 1
         if self.n_agents > 1:
             print("WARNING, CENTRALIZED TRAINING CANT HAVE MORE THAN 1 AGENT")
             self.n_agents = 1
@@ -301,16 +301,20 @@ class QuadrotorFormationMARL(gym.Env):
             z = self.tanks[agent_ind].state[2]
             r = 3
             self.uncertainty_grid[max(x-r, 0):min(x+r, self.x_lim), max(y-r, 0):min(
-                y+r, self.y_lim), max(z-r, 0):min(z+r, self.z_lim)] = 0.75
+                y+r, self.y_lim), max(z-r, 0):min(z+r, self.z_lim)] -= 0.25
             r = 2
             self.uncertainty_grid[max(x-r, 0):min(x+r, self.x_lim), max(y-r, 0):min(
-                y+r, self.y_lim), max(z-r, 0):min(z+r, self.z_lim)] = 0.5
+                y+r, self.y_lim), max(z-r, 0):min(z+r, self.z_lim)] -= 0.5
             r = 1
+
             self.uncertainty_grid[max(x-r, 0):min(x+r, self.x_lim), max(y-r, 0):min(
-                y+r, self.y_lim), max(z-r, 0):min(z+r, self.z_lim)] = 0.25
+                y+r, self.y_lim), max(z-r, 0):min(z+r, self.z_lim)] -= 0.75
             r = 0
-            self.uncertainty_grid[max(x-r, 0):min(x+r, self.x_lim), max(
-                y-r, 0):min(y+r, self.y_lim), max(z-r, 0):min(z+r, self.z_lim)] = 0
+
+            self.uncertainty_grid[max(x-r, 0):min(x+r, self.x_lim), max(y-r, 0):min(
+                y+r, self.y_lim), max(z-r, 0):min(z+r, self.z_lim)] -= 1
+
+            self.uncertainty_grid = np.clip(self.uncertainty_grid, 0, 1)
 
         if (not agent and bot_agent) or (not bot_agent and not tank_bot_agent) or (not agent and not tank_agent):
             done = True
@@ -331,8 +335,8 @@ class QuadrotorFormationMARL(gym.Env):
         if self.exploration_learning == False:
             rewarrd = reward_list[0]+tank_reward_list[0]
         else:
-            reward = np.sum(
-                (np.ones((self.x_lim, self.y_lim, self.z_lim))-self.uncertainty_grid))
+            reward = np.sum(self.uncertainty_grid)
+            print(self.uncertainty_grid)
             rewarrd = -reward
 
         self.current_step += 1
@@ -716,6 +720,10 @@ class QuadrotorFormationMARL(gym.Env):
         else:
             print("Invalid discrete action!")
 
+        if self.is_collided(self.quadrotors[drone_index].state, discrete_action):
+            self.quadrotors[drone_index].is_alive = False
+            self.quadrotors[drone_index].state = np.array([-1, -1, -1])
+
         drone_current_state = np.copy(self.quadrotors[drone_index].state)
         return drone_current_state
         #############################################editedlines#################################
@@ -748,6 +756,9 @@ class QuadrotorFormationMARL(gym.Env):
 
         else:
             print("Invalid discrete action!")
+        if self.is_collided(self.tanks[drone_index].state, discrete_action):
+            self.tanks[drone_index].is_alive = False
+            self.tanks[drone_index].state = np.array([-1, -1, -1])
 
         tank_current_state = np.copy(self.tanks[drone_index].state)
 
