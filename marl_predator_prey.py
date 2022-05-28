@@ -1,3 +1,4 @@
+from cv2 import exp
 import gym
 from gym import spaces
 from gym.utils import seeding
@@ -5,8 +6,11 @@ from gym.envs.classic_control import rendering
 import numpy as np
 from os import path
 import itertools
+
 from quadrotor_dynamics import Drone, Bot, Tank1, Tank_Bot
 from collections import deque
+from itertools import product
+from matplotlib import pyplot as plt
 
 
 font = {'family': 'sans-serif',
@@ -18,7 +22,7 @@ class QuadrotorFormationMARL(gym.Env):
 
     def __init__(self, n_agents=1, n_bots=2,
                  n_tank_agents=1, n_tank_bots=2,
-                 N_frame=5, visualization=True,
+                 N_frame=5, visualization=False,
                  is_centralized=False, moving_target=True, exploration_learning=True):
 
         super(QuadrotorFormationMARL, self).__init__()
@@ -55,10 +59,10 @@ class QuadrotorFormationMARL(gym.Env):
         self.obstacle_point = []
         #################################Obstacles#########################
 
-        self.obstacle_points = np.array(
-            [])  # [[10, 5, 1, 12, 10, 2], [0, 10, 3, 1, 12, 5], [0, 11, 2, 2, 13, 3]])
+        self.obstacle_points = np.array([]
+                                        )  # [[10, 5, 1, 12, 10, 2], [0, 10, 3, 1, 12, 5], [0, 11, 2, 2, 13, 3]])
         self.static_obstacle_points = np.array(
-            [])  # [[0, 5, 1, 1, 8, 4], [10, 0, 0, 12, 3, 2], [6, 2, 1, 8, 5, 4]])
+            [])  # [[1, 2, 3, 3, 5, 4], [1, 2, 0, 3, 5, 2], [1, 1, 3, 3, 3, 4]])  # [[0, 5, 1, 1, 8, 4], [10, 0, 0, 12, 3, 2], [6, 2, 1, 8, 5, 4]])
 
         self.obstacle_indices = None
         self.obstacle_pos_xy = None
@@ -74,34 +78,40 @@ class QuadrotorFormationMARL(gym.Env):
             self.n_agents = 1
 
         # 4*tank + 6*drone
-        if True:
-            self.action_space = spaces.Discrete(
-                (6*self.n_agents) + (4*self.n_tank_agents))
+
+        # 4*tank * 6*drone
+        if self.n_tank_agents == 0:
+            self.action_space = spaces.Discrete(6*self.n_agents)
+
+        else:
+            if True:
+                self.action_space = spaces.Discrete(
+                    (6*self.n_agents) * (4*self.n_tank_agents))
 
         # intitialize grid information
-        self.x_lim = 13  # grid x limit
-        self.y_lim = 13  # grid y limit
+        self.x_lim = 10  # grid x limit
+        self.y_lim = 10  # grid y limit
         self.z_lim = 5
-
+        self.n_obstacle = 0
         self.uncertainty_grid = np.ones((self.x_lim, self.y_lim, self.z_lim))
-        self.uncertainty_grid_visit = np.zeros((self.x_lim,self.y_lim,self.z_lim))
-
-
-        self.obs_shape = self.x_lim * self.y_lim * self.z_lim + \
+        self.uncertainty_grid_visit = np.zeros(
+            (self.x_lim, self.y_lim, self.z_lim))
+        self.obs_shape = ((self.max_drone_agents + self.max_tank_agents +
+                           self.max_drone_bots + self.max_tank_bots)*3+(self.x_lim*self.y_lim*self.z_lim)+6*self.n_obstacle,)
+        """ self.obs_shape = self.x_lim * self.y_lim * self.z_lim + \
             (self.max_drone_agents + self.max_tank_agents +
              self.max_drone_bots + self.max_tank_bots)*3
-
+        """
         self.observation_space = spaces.Box(low=-255, high=255,
-                                            shape=(120, ), dtype=np.float32)
+                                            shape=self.obs_shape, dtype=np.float32)
 
         self.lim_values = [self.x_lim, self.y_lim, self.z_lim]
 
         self.grid_res = 1.0  # resolution for grids
-        
+
         self.out_shape = 82  # width and height for uncertainty matrix
 
         self.neighbours = 1
-        
 
         X, Y, Z = np.mgrid[0: self.x_lim: self.grid_res,
                            0: self.y_lim: self.grid_res,
@@ -138,27 +148,27 @@ class QuadrotorFormationMARL(gym.Env):
         done = False
         cubic_env = np.zeros((self.x_lim, self.y_lim, self.z_lim))
 
-        #drone_total_explored_indices = []
-        #tank_total_explored_indices = []
+        # drone_total_explored_indices = []
+        # tank_total_explored_indices = []
 
         for i in range(len(self.obstacle_points)):
             self.obstacle_move(i)
 
-        #for i in range(self.n_agents):
+        # for i in range(self.n_agents):
           #  drone_total_explored_indices.append([])
 
-        #for i in range(self.n_tank_agents):
-            #tank_total_explored_indices.append([])
+        # for i in range(self.n_tank_agents):
+            # tank_total_explored_indices.append([])
 
-       #total_indices = np.arange(self.uncertainty_grids.shape[0])
+       # total_indices = np.arange(self.uncertainty_grids.shape[0])
 
-        #self.no_obstacle_indices = np.setdiff1d(
-            #total_indices, self.obstacle_indices)
+        # self.no_obstacle_indices = np.setdiff1d(
+            # total_indices, self.obstacle_indices)
 
         reward_list = np.ones(self.n_agents) * (-1)
         tank_reward_list = np.ones(self.n_tank_agents) * (-1)
-        reward_list_uncertainty = np.zeros(self.n_agents) * (-1)
-        tank_reward_list_uncertainty = np.zeros(self.n_tank_agents) * (-1)
+        reward_list_uncertainty = np.zeros(self.n_agents)
+        tank_reward_list_uncertainty = np.zeros(self.n_tank_agents)
 
         tank_action, action_1 = divmod(action, 6)
 
@@ -176,15 +186,19 @@ class QuadrotorFormationMARL(gym.Env):
             for agent_ind in range(self.n_agents):
                 if self.quadrotors[agent_ind].is_alive:
                     current_action = agents_actions[agent_ind]
-                    self.get_drone_des_grid(
+                    _, drone_agent_down = self.get_drone_des_grid(
                         agent_ind, current_action)
+                    if drone_agent_down:
+                        reward_list_uncertainty[agent_ind] -= 10000
 
         if self.n_tank_agents:
             for agent_ind in range(self.n_tank_agents):
                 if self.tanks[agent_ind].is_alive:
                     tank_current_action = tank_agents_actions[agent_ind]
-                    self.get_tank_des_grid(
+                    _, tank_agent_down = self.get_tank_des_grid(
                         agent_ind, tank_current_action)
+                    if tank_agent_down:
+                        tank_reward_list_uncertainty[agent_ind] -= 10000
 
         if self.moving_target:
             for bot_ind in range(self.n_bots):
@@ -192,8 +206,8 @@ class QuadrotorFormationMARL(gym.Env):
                     route_change = self.get_bot_des_grid(bot_ind)
 
                     if np.linalg.norm(self.bots[bot_ind].state - self.bots[bot_ind].target_state) < 3.5 or route_change:
-                        target_pos = [self.np_random.randint(low=0, high=self.x_lim - 1), self.np_random.randint(
-                            low=0, high=self.y_lim - 1), self.np_random.randint(low=0, high=self.z_lim - 1)]
+                        target_pos = [self.np_random.randint(low=0, high=self.x_lim), self.np_random.randint(
+                            low=0, high=self.y_lim), self.np_random.randint(low=0, high=self.z_lim)]
                         self.bots[bot_ind].target_state = target_pos
 
             for bot_ind in range(self.n_tank_bots):
@@ -202,7 +216,7 @@ class QuadrotorFormationMARL(gym.Env):
 
                     if np.linalg.norm(self.tank_bots[bot_ind].state-self.tank_bots[bot_ind].target_state) < 3.5 or route_change_tank:
                         target_pos = [self.np_random.randint(
-                            low=0, high=self.x_lim - 1), self.np_random.randint(low=0, high=self.y_lim - 1), 0]
+                            low=0, high=self.x_lim), self.np_random.randint(low=0, high=self.y_lim), 0]
                         self.tank_bots[bot_ind].target_state = target_pos
 
         for agent_ind in range(self.n_agents):
@@ -220,8 +234,8 @@ class QuadrotorFormationMARL(gym.Env):
                             [-1, -1, -1])
                         reward_list[agent_ind] -= 299
                         reward_list[other_agents_ind] -= 299
-                        reward_list_uncertainty[agent_ind] -=100
-                        reward_list_uncertainty[other_agents_ind] -=100
+                        reward_list_uncertainty[agent_ind] -= 100
+                        reward_list_uncertainty[other_agents_ind] -= 100
 
             if not self.quadrotors[agent_ind].is_alive:
                 reward_list[agent_ind] += 1
@@ -259,8 +273,8 @@ class QuadrotorFormationMARL(gym.Env):
                             [-1, -1, -1])
                         tank_reward_list[agent_ind] -= 300
                         tank_reward_list[other_agents_ind] -= 300
-                        tank_reward_list_uncertainty[agent_ind] -=100
-                        tank_reward_list_uncertainty[other_agents_ind] -=100
+                        tank_reward_list_uncertainty[agent_ind] -= 100
+                        tank_reward_list_uncertainty[other_agents_ind] -= 100
 
             if not self.tanks[agent_ind].is_alive:
                 tank_reward_list[agent_ind] += 1
@@ -281,6 +295,7 @@ class QuadrotorFormationMARL(gym.Env):
         bot_agent = any(map(lambda x: x.is_alive, self.bots))
         tank_bot_agent = any(map(lambda x: x.is_alive, self.tank_bots))
 
+        """ 
         for agent_ind in range(self.n_agents):
             cubic_env[self.quadrotors[agent_ind].state[0]
                       ][self.quadrotors[agent_ind].state[1]][self.quadrotors[agent_ind].state[2]] = - 1
@@ -296,49 +311,101 @@ class QuadrotorFormationMARL(gym.Env):
         for agent_ind in range(self.n_tank_bots):
             cubic_env[self.tank_bots[agent_ind].state[0]
                       ][self.tank_bots[agent_ind].state[1]][self.tank_bots[agent_ind].state[2]] = -1
+         """
 
         for obstacle in self.obstacle_points:
             mox, moy, moz, ox, oy, oz = obstacle
             cubic_env[mox:ox][moy:oy][moz:oz] = 1
 
         # .####################### uncertainty_grids ##################################3
-        self.uncertainty_grid += 0.01
-        
+        # self.uncertainty_grid += 0.01
+
         for agent_ind in range(self.n_agents):
+
             x = self.quadrotors[agent_ind].state[0]
             y = self.quadrotors[agent_ind].state[1]
             z = self.quadrotors[agent_ind].state[2]
-            
+
             r = self.neighbours
-            reward_list_uncertainty[agent_ind] = self.uncertainty_grid[self.quadrotors[agent_ind].state[0]
-                                  ][self.quadrotors[agent_ind].state[1]][self.quadrotors[agent_ind].state[2]]
 
-            self.uncertainty_grid[max(x-r, 0):min(x+r, self.x_lim)][max(y-r, 0):min(
-                y+r, self.y_lim)][max(z-r, 0):min(z+r, self.z_lim)] -= 0.0005 * np.exp(self.uncertainty_grid_visit[self.quadrotors[agent_ind].state[0]
-                                  ][self.quadrotors[agent_ind].state[1]][self.quadrotors[agent_ind].state[2]])
-           
-            self.uncertainty_grid_visit[max(x-r, 0):min(x+r, self.x_lim)][max(y-r, 0):min(
-                y+r, self.y_lim)][max(z-r, 0):min(z+r, self.z_lim)] +=1
+            #print(max(x-r, 0), min(x+r, self.x_lim))
 
+            reward_list_uncertainty[agent_ind] = np.sum(self.uncertainty_grid[max(
+                x-r, 0):min(x+r, self.x_lim), y, z]) + np.sum(self.uncertainty_grid[x, max(
+                    y-r, 0):min(y+r, self.y_lim), z]) + np.sum(self.uncertainty_grid[x, y, max(
+                        z-r, 0):min(z+r, self.z_lim)]) - 2 * self.uncertainty_grid[x, y, z] \
+                - (np.sum(self.uncertainty_grid_visit[max(
+                    x-r, 0):min(x+r, self.x_lim), y, z]) + np.sum(self.uncertainty_grid_visit[x, max(
+                        y-r, 0):min(y+r, self.y_lim), z]) + np.sum(self.uncertainty_grid_visit[x, y, max(
+                            z-r, 0):min(z+r, self.z_lim)]) - 2*self.uncertainty_grid_visit[x, y, z]) / 0.1
+
+            self.uncertainty_grid[max(x-r, 0): min(x+r, self.x_lim), y, z] -= 0.3 * np.exp(self.uncertainty_grid_visit[max(
+                x-r, 0):min(x+r, self.x_lim), y, z])
+
+            self.uncertainty_grid[x, max(y-r, 0):min(y+r, self.y_lim), z] -= 0.3 * np.exp(self.uncertainty_grid_visit[x, max(
+                y-r, 0):min(y+r, self.y_lim), z])
+
+            self.uncertainty_grid[x, y, max(z-r, 0):min(z+r, self.z_lim)] -= 0.3 * np.exp(self.uncertainty_grid_visit[x, y, max(
+                z-r, 0):min(z+r, self.z_lim)])
+
+            self.uncertainty_grid_visit[max(
+                x-r, 0):min(x+r, self.x_lim), y, z] += 1
+
+            self.uncertainty_grid_visit[x, max(
+                y-r, 0):min(y+r, self.y_lim), z] += 1
+
+            self.uncertainty_grid_visit[x, y, z] += 1
+
+            """ self.uncertainty_grid_visit[max(x-r, 0):min(x+r, self.x_lim)][max(y-r, 0):min(
+            y+r, self.y_lim)][max(z-r, 0):min(z+r, self.z_lim)] += 1
+            """
+            self.uncertainty_grid = np.clip(self.uncertainty_grid, 0, 1)
+        # print(self.uncertainty_grid.shape)
+        # print(self.uncertainty_grid_visit.shape)
+        """ print(action_1)
+        print(self.quadrotors[0].state[0],
+              self.quadrotors[0].state[1], self.quadrotors[0].state[2]) """
         for agent_ind in range(self.n_tank_agents):
 
             x = self.tanks[agent_ind].state[0]
             y = self.tanks[agent_ind].state[1]
             z = self.tanks[agent_ind].state[2]
-         
+
             r = self.neighbours
 
-            tank_reward_list_uncertainty[agent_ind] = self.uncertainty_grid[self.quadrotors[agent_ind].state[0]
-                                  ][self.quadrotors[agent_ind].state[1]][self.quadrotors[agent_ind].state[2]]
+            tank_reward_list_uncertainty[agent_ind] = np.sum(self.uncertainty_grid[max(
+                x-r, 0):min(x+r, self.x_lim), y, z]) + np.sum(self.uncertainty_grid[x, max(
+                    y-r, 0):min(y+r, self.y_lim), z]) + np.sum(self.uncertainty_grid[x, y, max(
+                        z-r, 0):min(z+r, self.z_lim)]) - 2 * self.uncertainty_grid[x, y, z] \
+                - (np.sum(self.uncertainty_grid_visit[max(
+                    x-r, 0):min(x+r, self.x_lim), y, z]) + np.sum(self.uncertainty_grid_visit[x, max(
+                        y-r, 0):min(y+r, self.y_lim), z]) + np.sum(self.uncertainty_grid_visit[x, y, max(
+                            z-r, 0):min(z+r, self.z_lim)]) - 2*self.uncertainty_grid_visit[x, y, z]) / 0.1
 
-            self.uncertainty_grid[max(x-r, 0):min(x+r, self.x_lim)][max(y-r, 0):min(
-                y+r, self.y_lim)][max(z-r, 0):min(z+r, self.z_lim)] -= 0.0005 * np.exp(self.uncertainty_grid_visit[self.quadrotors[agent_ind].state[0]
-                                  ][self.quadrotors[agent_ind].state[1]][self.quadrotors[agent_ind].state[2]])
-           
-            self.uncertainty_grid_visit[max(x-r, 0):min(x+r, self.x_lim)][max(y-r, 0):min(
-                y+r, self.y_lim)][max(z-r, 0):min(z+r, self.z_lim)] +=1
-        
-        self.uncertainty_grid = np.clip(self.uncertainty_grid, 0, 1)
+            self.uncertainty_grid[max(x-r, 0): min(x+r, self.x_lim), y, z] -= 0.3 * np.exp(self.uncertainty_grid_visit[max(
+                x-r, 0):min(x+r, self.x_lim), y, z])
+
+            self.uncertainty_grid[x, max(y-r, 0):min(y+r, self.y_lim), z] -= 0.3 * np.exp(self.uncertainty_grid_visit[x, max(
+                y-r, 0):min(y+r, self.y_lim), z])
+
+            self.uncertainty_grid[x, y, max(z-r, 0):min(z+r, self.z_lim)] -= 0.3 * np.exp(self.uncertainty_grid_visit[x, y, max(
+                z-r, 0):min(z+r, self.z_lim)])
+
+            self.uncertainty_grid_visit[max(
+                x-r, 0):min(x+r, self.x_lim), y, z] += 1
+
+            self.uncertainty_grid_visit[x, max(
+                y-r, 0):min(y+r, self.y_lim), z] += 1
+
+            self.uncertainty_grid_visit[x, y, z] += 1
+
+            """ self.uncertainty_grid_visit[max(x-r, 0):min(x+r, self.x_lim)][max(y-r, 0):min(
+            y+r, self.y_lim)][max(z-r, 0):min(z+r, self.z_lim)] += 1
+            """
+            self.uncertainty_grid = np.clip(self.uncertainty_grid, 0, 1)
+        # print(self.uncertainty_grid)
+
+        # print(self.uncertainty_grid_visit)
 
         if (not agent and bot_agent) or (not bot_agent and not tank_bot_agent) or (not agent and not tank_agent):
             done = True
@@ -349,20 +416,39 @@ class QuadrotorFormationMARL(gym.Env):
         if done and bot_agent:
             pass
 
-        if self.visualization:
-            self.visualize()
-
-        if self.current_step > 100:
+        if (np.sum(self.uncertainty_grid_visit == 0) < self.x_lim*self.y_lim*self.z_lim*0.4) & self.exploration_learning:
+            print("Map succesfully explored in " +
+                  str(self.current_step) + "steps")
             done = True
+
+        if self.current_step > 200:
+            done = True
+            print("Map failed succesfully")
             reward_list -= 100
+            reward_list_uncertainty -= 10
+            reward_list_uncertainty -= 10
 
         if self.exploration_learning == False:
+
             reward = reward_list[0]+tank_reward_list[0]
-        
+
         else:
-            reward = np.sum(reward_list_uncertainty)+np.sum(tank_reward_list_uncertainty)
-            
-            
+
+            reward = np.sum(reward_list_uncertainty) + \
+                np.sum(tank_reward_list_uncertainty)
+
+        if self.visualization:
+
+            fig = plt.figure()
+            self.ax = fig.add_subplot(111, projection='3d')
+
+            self.ax.set_xlim3d(0, self.x_lim)
+            self.ax.set_ylim3d(0, self.y_lim)
+            self.ax.set_zlim3d(0, self.z_lim)
+
+            self.visualize()
+
+            plt.clf()
 
         self.current_step += 1
 
@@ -397,7 +483,7 @@ class QuadrotorFormationMARL(gym.Env):
         observationlist = np.concatenate(
             [state, tank_state, bot_state, Tank_bot_state]).flatten()
         observationlist = np.concatenate(
-            [observationlist, self.obstacle_points.flatten(), self.static_obstacle_points.flatten()]).flatten()
+            [observationlist, self.uncertainty_grid.flatten(), self.obstacle_points.flatten(), self.static_obstacle_points.flatten()]).flatten()
 
         self.observation_space = observationlist
         return observationlist
@@ -407,8 +493,8 @@ class QuadrotorFormationMARL(gym.Env):
 
         for _ in range(0, self.n_agents):
             while True:
-                current_pos = [self.np_random.randint(low=0, high=self.x_lim-1), self.np_random.randint(
-                    low=0, high=self.y_lim-1), self.np_random.randint(low=0, high=self.z_lim-1)]
+                current_pos = [self.np_random.randint(low=0, high=self.x_lim), self.np_random.randint(
+                    low=0, high=self.y_lim), self.np_random.randint(low=0, high=self.z_lim)]
                 state0 = [current_pos[0], current_pos[1], current_pos[2]]
                 if not self.is_inside(state0):
                     break
@@ -432,6 +518,7 @@ class QuadrotorFormationMARL(gym.Env):
         self.bots = []
 
         for _ in range(0, self.n_bots):
+
             while True:
                 current_pos = [self.np_random.randint(low=0, high=self.x_lim-1), self.np_random.randint(
                     low=0, high=self.y_lim-1), self.np_random.randint(low=0, high=self.z_lim-1)]
@@ -440,6 +527,7 @@ class QuadrotorFormationMARL(gym.Env):
 
                 state0 = [current_pos[0], current_pos[1], current_pos[2]]
                 target_state0 = [target_pos[0], target_pos[1], target_pos[2]]
+
                 if not self.is_inside(state0):
                     break
 
@@ -449,6 +537,7 @@ class QuadrotorFormationMARL(gym.Env):
         self.tank_bots = list()
 
         for _ in range(0, self.n_tank_bots):
+
             while True:
                 current_pos = [self.np_random.randint(
                     low=0, high=self.x_lim-1), self.np_random.randint(low=0, high=self.y_lim-1), 0]
@@ -457,6 +546,7 @@ class QuadrotorFormationMARL(gym.Env):
 
                 state0 = [current_pos[0], current_pos[1], current_pos[2]]
                 target_state0 = [target_pos[0], target_pos[1], target_pos[2]]
+
                 if not self.is_inside(state0):
                     break
 
@@ -464,7 +554,9 @@ class QuadrotorFormationMARL(gym.Env):
 
     def check_collision(self):
         collision = False
+
         for agent_ind in range(self.n_agents):
+
             for other_agents_ind in range(self.n_agents):
 
                 if agent_ind != other_agents_ind:
@@ -475,6 +567,7 @@ class QuadrotorFormationMARL(gym.Env):
                         collision = True
 
         for bot_ind in range(self.n_bots):
+
             for other_bots_ind in range(self.n_bots):
 
                 if bot_ind != other_bots_ind:
@@ -485,6 +578,7 @@ class QuadrotorFormationMARL(gym.Env):
                         collision = True
 
         for agent_ind in range(self.n_tank_agents):
+
             for other_agents_ind in range(self.n_tank_agents):
 
                 if agent_ind != other_agents_ind:
@@ -495,6 +589,7 @@ class QuadrotorFormationMARL(gym.Env):
                         collision = True
 
         for bot_ind in range(self.n_tank_bots):
+
             for other_bots_ind in range(self.n_tank_bots):
 
                 if bot_ind != other_bots_ind:
@@ -513,9 +608,9 @@ class QuadrotorFormationMARL(gym.Env):
         self.generate_tank_bot_position()
         self.iteration = 1
 
-
-        self.uncertainty_grid = np.ones((self.x_lim,self.y_lim,self.z_lim))
-        self.uncertainty_grid_visit = np.zeros((self.x_lim,self.y_lim,self.z_lim))
+        self.uncertainty_grid = np.ones((self.x_lim, self.y_lim, self.z_lim))
+        self.uncertainty_grid_visit = np.zeros(
+            (self.x_lim, self.y_lim, self.z_lim))
 
         self.current_step = 0
         collision = self.check_collision()
@@ -525,7 +620,7 @@ class QuadrotorFormationMARL(gym.Env):
         else:
             pass
 
-        return np.zeros((120, ))
+        return np.zeros(self.obs_shape)
 
     def get_drone_stack(self, agent_ind):
         drone_closest_grids = self.get_closest_n_grids(
@@ -559,14 +654,14 @@ class QuadrotorFormationMARL(gym.Env):
         if self.bots[bot_index].state[0] - self.bots[bot_index].target_state[0] > 2:
             action = 1
             if not self.is_collided(self.bots[bot_index].state, action):
-                self.bots[bot_index].state[0] -= 1
+                self.bots[bot_index].state[0] -= self.drone_bot_speed
                 self.bots[bot_index].state[0] = np.clip(
                     self.bots[bot_index].state[0], 0,  self.x_lim-1)
 
         elif self.bots[bot_index].state[0] - self.bots[bot_index].target_state[0] < -2:
             action = 0
             if not self.is_collided(self.bots[bot_index].state, action):
-                self.bots[bot_index].state[0] += 1
+                self.bots[bot_index].state[0] += self.drone_bot_speed
 
                 self.bots[bot_index].state[0] = np.clip(
                     self.bots[bot_index].state[0], 0,  self.x_lim-1)
@@ -574,31 +669,31 @@ class QuadrotorFormationMARL(gym.Env):
         elif self.bots[bot_index].state[1] - self.bots[bot_index].target_state[1] > 2:
             action = 3
             if not self.is_collided(self.bots[bot_index].state, action):
-                self.bots[bot_index].state[1] -= 1
+                self.bots[bot_index].state[1] -= self.drone_bot_speed
 
                 self.bots[bot_index].state[1] = np.clip(
-                    self.bots[bot_index].state[1], 0,  self.x_lim-1)
+                    self.bots[bot_index].state[1], 0,  self.y_lim-1)
 
         elif self.bots[bot_index].state[1] - self.bots[bot_index].target_state[1] < -2:
             action = 2
             if not self.is_collided(self.bots[bot_index].state, action):
-                self.bots[bot_index].state[1] += 1
+                self.bots[bot_index].state[1] += self.drone_bot_speed
                 self.bots[bot_index].state[1] = np.clip(
-                    self.bots[bot_index].state[1], 0,  self.x_lim-1)
+                    self.bots[bot_index].state[1], 0,  self.y_lim-1)
 
         elif self.bots[bot_index].state[2] - self.bots[bot_index].target_state[2] > 2:
             action = 5
             if not self.is_collided(self.bots[bot_index].state, action):
-                self.bots[bot_index].state[2] -= 1
+                self.bots[bot_index].state[2] -= self.drone_bot_speed
                 self.bots[bot_index].state[2] = np.clip(
-                    self.bots[bot_index].state[2], 0,  self.x_lim-1)
+                    self.bots[bot_index].state[2], 0,  self.z_lim-1)
 
         elif self.bots[bot_index].state[2] - self.bots[bot_index].target_state[2] < -2:
             action = 4
             if not self.is_collided(self.bots[bot_index].state, action):
                 self.bots[bot_index].state[2] += 1
                 self.bots[bot_index].state[2] = np.clip(
-                    self.bots[bot_index].state[2], 0,  self.x_lim-1)
+                    self.bots[bot_index].state[2], 0,  self.z_lim-1)
 
         if np.all(self.prev_state == self.bots[bot_index].state):
             change_route = True
@@ -748,13 +843,13 @@ class QuadrotorFormationMARL(gym.Env):
 
         else:
             print("Invalid discrete action!")
-
+        agent_down = False
         if self.is_collided(self.quadrotors[drone_index].state, discrete_action):
             self.quadrotors[drone_index].is_alive = False
             self.quadrotors[drone_index].state = np.array([-1, -1, -1])
-
+            agent_down = True
         drone_current_state = np.copy(self.quadrotors[drone_index].state)
-        return drone_current_state
+        return drone_current_state, agent_down
         #############################################editedlines#################################
 
     def get_tank_des_grid(self, drone_index, discrete_action):
@@ -785,13 +880,16 @@ class QuadrotorFormationMARL(gym.Env):
 
         else:
             print("Invalid discrete action!")
+        agent_down = False
+
         if self.is_collided(self.tanks[drone_index].state, discrete_action):
             self.tanks[drone_index].is_alive = False
             self.tanks[drone_index].state = np.array([-1, -1, -1])
+            agent_down = True
 
         tank_current_state = np.copy(self.tanks[drone_index].state)
 
-        return tank_current_state
+        return tank_current_state, agent_down
 
     def get_closest_n_grids(self, current_pos, n):
         differences = current_pos-self.uncertainty_grids
@@ -809,90 +907,59 @@ class QuadrotorFormationMARL(gym.Env):
         return min_ind
 
     def visualize(self, mode='human'):
-        if self.viewer is None:
-            self.viewer = rendering.Viewer(500, 500)
-            self.viewer.set_bounds(0,
-                                   self.x_lim, 0, self.y_lim)
-            fname = path.join(path.dirname(__file__), "assets/dr.png")
-            fname2 = path.join(path.dirname(__file__), "assets/plane2.png")
-            fname3 = path.join(path.dirname(__file__), "assets/tank1.png")
-            fname4 = path.join(path.dirname(__file__), "assets/tank2.png")
+        RESOLUTION = 6
 
-            self.drone_transforms = []
-            self.drones = []
+        for obs_point in self.obstacle_points:
 
-            self.prey_transforms = []
-            self.preys = []
+            x1, y1, z1, x2, y2, z2 = obs_point
 
-            self.tank_transforms = []
-            self.tank = []
+            zex = np.linspace(z1, z2, RESOLUTION)
+            iks = np.linspace(x1, x2, RESOLUTION)
+            yeğ = np.linspace(y1, y2, RESOLUTION)
 
-            self.tank_prey_transforms = []
-            self.tank_preys = []
+            for x, y in product(iks, yeğ):
+                self.ax.scatter(x, y, zex, color='black')
 
-            for i in range(len(self.obstacle_points)):
-                obstacle = rendering.make_polygon([(self.obstacle_points[i][0], self.obstacle_points[i][1]),
-                                                   (self.obstacle_points[i][0],
-                                                  self.obstacle_points[i][4]),
-                                                   (self.obstacle_points[i][3],
-                                                    self.obstacle_points[i][4]),
-                                                   (self.obstacle_points[i][3], self.obstacle_points[i][1])])
+        for obs_point in self.static_obstacle_points:
+            x1, y1, z1, x2, y2, z2 = obs_point
+            zex = np.linspace(z1, z2, RESOLUTION)
+            iks = np.linspace(x1, x2, RESOLUTION)
+            yeğ = np.linspace(y1, y2, RESOLUTION)
 
-                obstacle_transform = rendering.Transform()
-                obstacle.add_attr(obstacle_transform)
-                obstacle.set_color(.8, .3, .3)
-                self.viewer.add_geom(obstacle)
+            for x, y in product(iks, yeğ):
+                self.ax.scatter(x, y, zex, color='purple')
 
-            for i in range(self.n_agents):
-                self.drone_transforms.append(rendering.Transform())
-                self.drones.append(rendering.Image(fname, 2., 2.))
-                self.drones[i].add_attr(self.drone_transforms[i])
+        # dıron
+        print(self.n_tank_agents)
+        for agent_ind in range(self.n_agents):
+            # , self.tanks[agent_ind].state[2]
+            x, y, z = self.quadrotors[agent_ind].state[0], self.quadrotors[agent_ind].state[1], 0
+            self.ax.scatter(x, y, z, color='pink')
 
-            for i in range(self.n_bots):
-                self.prey_transforms.append(rendering.Transform())
-                self.preys.append(rendering.Image(fname2, 2., 2.))
-                self.preys[i].add_attr(self.prey_transforms[i])
+        # tenk
+        for agent_ind in range(self.n_tank_agents):
+            # , self.tanks[agent_ind].state[2]
+            x, y, z = self.tanks[agent_ind].state[0], self.tanks[agent_ind].state[1], 0
+            self.ax.scatter(x, y, z, color='orange')
 
-            for i in range(self.n_tank_agents):
-                self.tank_transforms.append(rendering.Transform())
-                self.tank.append(rendering.Image(fname3, 2., 2.))
-                self.tank[i].add_attr(self.tank_transforms[i])
+        for agent_ind in range(self.n_tank_bots):
+            # self.tank_bots[agent_ind].state[2]
+            x, y, z = self.tank_bots[agent_ind].state[0], self.tank_bots[agent_ind].state[1], 0
+            self.ax.scatter(x, y, z, color='red')
 
-            for i in range(self.n_tank_bots):
-                self.tank_prey_transforms.append(rendering.Transform())
-                self.tank_preys.append(rendering.Image(fname4, 2., 2.))
-                self.tank_preys[i].add_attr(self.tank_prey_transforms[i])
+        for agent_ind in range(self.n_bots):
+            # self.bots[agent_ind].state[2]
+            x, y, z = self.bots[agent_ind].state[0], self.bots[agent_ind].state[1], 0
+            self.ax.scatter(x, y, z, color='blue')
 
-        for i in range(self.n_bots):
-            if self.bots[i].is_alive:
-                self.viewer.add_onetime(self.preys[i])
-                self.prey_transforms[i].set_translation(
-                    self.bots[i].state[0], self.bots[i].state[1])
-                self.prey_transforms[i].set_rotation(self.bots[i].psid)
+        self.ax.scatter(self.x_lim, self.y_lim, self.z_lim, color='white')
+        self.ax.scatter(0, 0, 0, color='white')
 
-        for i in range(self.n_agents):
-            if self.quadrotors[i].is_alive:
-                self.viewer.add_onetime(self.drones[i])
-                self.drone_transforms[i].set_translation(
-                    self.quadrotors[i].state[0], self.quadrotors[i].state[1])
-                self.drone_transforms[i].set_rotation(self.quadrotors[i].psi)
+        self.ax.scatter(self.x_lim/2, self.y_lim/2, self.z_lim, color='white')
 
-        for i in range(self.n_tank_bots):
-            if self.tank_bots[i].is_alive:
-                self.viewer.add_onetime(self.tank_preys[i])
-                self.tank_prey_transforms[i].set_translation(
-                    self.tank_bots[i].state[0], self.tank_bots[i].state[1])
-                self.tank_prey_transforms[i].set_rotation(
-                    self.tank_bots[i].psid)
+        plt.pause(10)
 
-        for i in range(self.n_tank_agents):
-            if self.tanks[i].is_alive:
-                self.viewer.add_onetime(self.tank[i])
-                self.tank_transforms[i].set_translation(
-                    self.tanks[i].state[0], self.tanks[i].state[1])
-                self.tank_transforms[i].set_rotation(self.tanks[i].psi)
-
-        return self.viewer.render(return_rgb_array=mode == 'rgb_array')
+        return
 
     def get_obstacle_indices(self):
         lst = []
